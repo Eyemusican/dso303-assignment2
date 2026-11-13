@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "infra/**"
+      - ".github/workflows/deploy.yml"
+
+# needed for the OIDC login, no AWS keys are stored in GitHub
+permissions:
+  id-token: write
+  contents: read
+
+# never run two deploys at the same time
+concurrency: deploy
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to AWS with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          terraform init -input=false -backend-config="bucket=tenzin-a2-tfstate-${ACCOUNT_ID}"
+
+      # first run: the ECR repo must exist before we can push an image to it
+      - name: Create ECR repository if missing
+        run: terraform apply -input=false -auto-approve -target=aws_ecr_repository.api
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API image
+        working-directory: app/api
+        run: |
+          REPO=${{ steps.ecr.outputs.registry }}/tenzin-a2-api
+          docker build -t $REPO:${{ github.sha }} -t $REPO:latest .
+          docker push $REPO:${{ github.sha }}
+          docker push $REPO:latest
+
+      # full apply; the new image tag makes a new task definition, which redeploys the ECS service
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve -var="image_tag=${{ github.sha }}"
+
+      - name: Wait for ECS service to be stable
+        run: |
+          aws ecs wait services-stable \
+            --cluster $(terraform output -raw ecs_cluster) \
+            --services $(terraform output -raw ecs_service)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: app/frontend
+        run: npm ci && npm run build
+
+      - name: Upload frontend and invalidate CloudFront
+        run: |
+          aws s3 sync ../app/frontend/dist s3://$(terraform output -raw frontend_bucket) --delete
+          aws cloudfront create-invalidation \
+            --distribution-id $(terraform output -raw cloudfront_distribution_id) \
+            --paths "/*"
+          echo "Site: $(terraform output -raw cloudfront_url)"
