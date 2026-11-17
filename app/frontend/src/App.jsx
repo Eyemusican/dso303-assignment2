@@ -51,7 +51,7 @@ export default function App() {
 
   return (
     <div className="page">
-      <h1>Online Exam</h1>
+      <h1>Online Exam - CST</h1>
 
       {!attempt && <button onClick={startExam}>Start exam</button>}
 
@@ -63,7 +63,12 @@ export default function App() {
               <li key={q.id}>{q.text}</li>
             ))}
           </ol>
-          <textarea rows="10" value={answers} onChange={onType} placeholder="Type your answers here" />
+          <textarea
+            rows="10"
+            value={answers}
+            onChange={onType}
+            placeholder="Type your answers here"
+          />
           <p className="status">{status || "Autosaves every 30 seconds"}</p>
         </div>
       )}
