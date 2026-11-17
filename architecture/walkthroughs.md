@@ -1,4 +1,4 @@
-# Request Walkthroughs
+﻿# Request Walkthroughs
 
 ## Walkthrough 1: A student opens an exam and answers autosave
 
@@ -13,9 +13,10 @@
 ## Walkthrough 2: A student uploads a 40 MB assignment and the tutor is notified
 
 1. The signed in student picks a 40 MB PDF. The frontend calls `POST /api/assignments/{id}/upload-url`.
-2. The ECS task checks the JWT, creates a presigned POST for the assignments bucket with a 50 MB size limit and a 5 minute expiry, and saves a pending submission in RDS.
+2. The ECS task checks the JWT, checks the file is a PDF or ZIP, then creates a presigned POST for the assignments bucket with a 50 MB size limit, the matching Content-Type and a 5 minute expiry, and saves a pending submission in RDS.
 3. The browser uploads the file directly to S3 over HTTPS. S3 encrypts it with the KMS key. The 40 MB file never passes through the ALB or ECS.
 4. When the upload finishes, S3 sends an ObjectCreated event to the notification SQS queue.
 5. A Lambda function reads the message, marks the submission as received in RDS, looks up the tutor's email and sends the notification through SES.
 6. If sending fails, SQS retries. After 3 failed tries the message goes to the dead letter queue and a CloudWatch alarm fires.
 7. Later, the S3 lifecycle rules move the file to Standard-IA after 30 days and Glacier after 1 year, and delete it after 5 years.
+
