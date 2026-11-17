@@ -57,28 +57,33 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# one NAT gateway per AZ so losing one AZ does not cut the other off
+# The design uses one NAT gateway per AZ. The shared class account hit its
+# Elastic IP limit, so this demo uses 1 NAT gateway for both app subnets.
+locals {
+  nat_count = 1
+}
+
 resource "aws_eip" "nat" {
-  count  = 2
+  count  = local.nat_count
   domain = "vpc"
   tags   = { Name = "${var.prefix}-nat-eip-${count.index + 1}" }
 }
 
 resource "aws_nat_gateway" "main" {
-  count         = 2
+  count         = local.nat_count
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
   tags          = { Name = "${var.prefix}-nat-${count.index + 1}" }
   depends_on    = [aws_internet_gateway.main]
 }
 
-# each app subnet uses the NAT gateway in its own AZ
+# each app subnet routes out through the NAT gateway
 resource "aws_route_table" "app" {
   count  = 2
   vpc_id = aws_vpc.main.id
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[count.index].id
+    nat_gateway_id = aws_nat_gateway.main[min(count.index, local.nat_count - 1)].id
   }
   tags = { Name = "${var.prefix}-app-rt-${count.index + 1}" }
 }

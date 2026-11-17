@@ -115,6 +115,8 @@ resource "aws_iam_role_policy" "deploy" {
           "lambda:DeleteEventSourceMapping",
           "lambda:ListEventSourceMappings",
           "lambda:TagResource",
+          "lambda:UntagResource",
+          "lambda:ListTags",
           "iam:CreateServiceLinkedRole"
         ]
         Resource = "*"
